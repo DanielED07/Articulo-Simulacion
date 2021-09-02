@@ -1,0 +1,408 @@
+---
+title: "Simulacion"
+author: "Daniel Escobar David"
+date: "30/8/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = F,warning = F)
+```
+
+```{r}
+rm(list=ls())
+library(geoR)
+library (gstat)
+library(MASS)
+library(sf)
+library(sp)
+library(geoR)
+library(raster)
+library(ggplot2)
+library(moments)
+library(forecast)
+library(rcompanion)
+library(HDInterval)
+```
+# Definición del contorno
+
+```{r}
+cont_bzl <- shapefile("brazil_administrative_boundaries_national_polygon.shp")
+cont <- cont_bzl@polygons[[2]]@Polygons[[1]]@coords
+
+brazil_contorno <-SpatialPolygons(list(Polygons(list(Polygon( cont )), "x")))
+brazil_contorno <- st_as_sf(brazil_contorno)
+st_crs(brazil_contorno) = 4326
+brazil_contorno <- st_transform(brazil_contorno,29101)
+contorno <- st_coordinates(brazil_contorno)[,c(1,2)]
+
+```
+
+# Inicio
+
+```{r}
+set.seed(1214747297)
+n <- 50
+u1 <- runif(1,2795398,7142564)
+u2 <- runif(1,6250620,10586132)
+grid <- cbind(u1,u2)
+in_sim <- matrix(grid[.geoR_inout(grid, contorno),],ncol=2)
+
+if(all(is.na(in_sim)==T)){
+  grid <- grid[-1,]
+}
+
+# DADO UN n: NUMERO DE PUNTOS A SIMULAR
+start <- Sys.time()
+while(dim(grid)[1]<n | all(is.na(grid)==T)){
+  row_in_sim <-dim(grid)[1] # Datos actuales en el contorno
+  u1 <- runif(1,2795398,7142564)
+  u2 <- runif(1,6250620,10586132)
+  new <- cbind(u1,u2)
+  
+  grid <- rbind(grid,new)
+  in_sim <- matrix(grid[.geoR_inout(grid, contorno),],ncol=2) # Esta dentro del contorno?
+  
+  if(dim(in_sim)[1]<=row_in_sim){ # Aumento el numero de puntos en el contorno?
+  grid <- matrix(grid[-dim(grid)[1],],ncol=2)
+}
+  
+}
+end <- Sys.time()
+
+end-start
+
+
+```
+
+# Definicion de puntos en formato georeferenciado
+```{r}
+sim_espacial <- st_as_sf(as.data.frame(grid),coords = c("u1","u2"), crs = 29101, agr = "constant")
+sim_espacial$Value <- as.numeric(1:n)
+sim_datos <- cbind(st_coordinates(sim_espacial)[,c(1,2)],"viento"=sim_espacial$Value)
+sim_datos <- as.data.frame(sim_datos)
+coordinates(sim_datos) <- ~X+Y
+
+sim_geo <- as.geodata(sim_datos,coords = 1:2,var=1,borders=T)
+sim_geo$borders <- contorno
+```
+
+# Mapa con ubicaciones simualdas 
+ 
+```{r}
+par(mfrow=c(1,1))
+points(sim_geo[])
+#points(grid, col=2, pch=19, cex=0.3)
+```
+
+
+# Simulacón valores en las ubicaciones simuladas 
+
+Realizamos simulación gaussiana sequencial a partir de los datos reales
+
+```{r}
+load("viento.RData") # Datos reales
+viento$Value <- as.numeric(viento$Value)
+viento <- na.omit(viento)
+
+brazil_espacial <- st_as_sf(viento[,-1],coords = c("Longitude","Latitude"), crs = 4326, agr = "constant")
+brazil_espacial$Value <- as.numeric(brazil_espacial$Value) # Datos en formato sf
+brazil_espacial <- st_transform(brazil_espacial,29101) # Datos a coordenadas plana
+
+ggplot() + 
+  geom_sf(data = brazil_contorno) + 
+  geom_sf(data = brazil_espacial,aes(color = Value), size = 2)+
+  scale_color_viridis_c(option = "C")+coord_sf(datum=st_crs(29101))+ 
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    panel.background = element_blank())
+```
+
+```{r}
+# Datos para tranformar tal que se distribuyan normal
+datos <- cbind("viento"=brazil_espacial$Value,st_coordinates(brazil_espacial)[,c(1,2)])
+datos <- na.omit(datos)
+datos <- as.data.frame(datos)
+```
+
+# Tranformacion Datos
+```{r}
+test <- na.omit(datos$viento)
+P <- ecdf(test) # función de distribución acumulada
+skewness(test)
+
+datos_t <- blom(test) # Datos con Transformación Normal Scores
+xs_nt <- cbind(test,datos_t) # Real y transformado
+xs <- inverseCDF(pnorm(datos_t),P)
+#View(cbind(xs_nt,xs))
+sum(abs(test-xs)) # Sesgo < 1% muy pequeño
+```
+```{r}
+datos_t <- cbind(datos[,c(2,3)],datos_t) # Datos transformados con coordenadas
+names(datos_t)[3] <-"Value"
+```
+
+# Grafico datos transformados
+```{r}
+brazil_espacial_t <- st_as_sf(datos_t,coords = c("X","Y"), crs = 29101, agr = "constant")
+
+ggplot() + 
+  geom_sf(data = brazil_contorno) + 
+  geom_sf(data = brazil_espacial_t,aes(color = Value), size = 2)+
+  scale_color_viridis_c(option = "C")+coord_sf(datum=st_crs(29101))+ 
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    panel.background = element_blank())
+```
+
+
+```{r}
+#--------#
+# E.D.A
+#--------#
+#---------------------------------#
+# Datos con coordenadas separadas
+#---------------------------------#
+
+datos_tt <- cbind("viento"=brazil_espacial_t$Value,st_coordinates(brazil_espacial_t)[,c(1,2)])
+datos_tt <- as.data.frame(datos_tt)
+coordinates(datos_tt) <- ~X+Y
+```
+
+```{r}
+#----------------------------------#
+# Transformar datos a formato geoR
+#----------------------------------#
+
+viento_geo_tt <- as.geodata(datos_tt,coords=2:3,var=1,borders=T)
+viento_geo_tt$borders <- contorno
+
+plot.geodata(viento_geo_tt)
+```
+
+
+# Ajuste variograma datos transformados
+
+```{r}
+vbin <- variogram(viento ~ 1, locations = coordinates(datos_tt),datos_tt)
+plot(vbin)
+
+# Fit Bin
+vbin.fit <- fit.variogram(vbin,vgm(c("Gau", "Sph", "Mat", "Exp")), fit.kappa = TRUE)
+plot(vbin,vbin.fit,main="Ajuste Semivariograma Bin")
+```
+
+A partir de aquí vamos a simular los valores para las ubicaciones simuladas haciendo uso de simulación gaussiana secuencial.
+
+# Simulación sequencial gaussiana
+
+```{r}
+mu_sigma <- matrix(0,nrow = n,ncol=2)# Matriz mu-sigma para cada ubicación 
+colnames(mu_sigma) <- c("mu","sigma")
+sim_values <- numeric(n)
+#----------------------------------------------------------------------------
+#----------------------------------------------------------------------------
+for (i in 1:n) {
+  #-------------------------------------------------------
+  # Kriging con la muestra para obtener mu y sigma
+  #-------------------------------------------------------
+  
+  if(i==1){
+    datos_pred.grid <- matrix(grid[c(i:2),],ncol=2 )# Ubicaciones simuladas
+  }else{datos_pred.grid <- matrix(grid[c(i:(i-1)),],ncol=2 )}# Ubicaciones simuladas
+  
+  colnames(datos_pred.grid) <- c("X","Y")
+  coords_pred <- as.data.frame(coordinates(datos_pred.grid))
+  gridded(coords_pred) = ~X+Y
+  
+  a <- capture.output(ubi.kriged <-  krige(viento~1,datos_tt,coords_pred[1,], model = vbin.fit)) # Predicción Krige
+  mu <- as.numeric(ubi.kriged["var1.pred"]@data)
+  sigma <- as.numeric(ubi.kriged["var1.var"]@data)
+  mu_sigma[i,] <- c(mu,sigma) # Valores mu y sigma para generar valor en la ubicacion "i"
+  #----------------------------------------------------------------------------
+  #----------------------------------------------------------------------------
+  #-------------------------------------------------------
+  # Nuevo valor generado
+  #-------------------------------------------------------
+  z <- rnorm(1,mu,sigma)
+  sim_values[i] <- z # Vector donde guardamos los valores originales para las ubicaciones simuladas
+  new <- matrix(c(grid[i,],z),ncol=3)
+  colnames(new) <- c("X","Y","Value")
+  #----------------------------------------------------------------------------
+  #----------------------------------------------------------------------------
+  #-------------------------------------------------------
+  # Agregar nuevo valor a la muestra
+  #-------------------------------------------------------
+  datos_t <- rbind(datos_t,new) # Datos transformados con coordenadas
+  names(datos_t)[3] <-"Value"
+  # Poner datos en formato correcto
+  brazil_espacial_t <- st_as_sf(datos_t,coords = c("X","Y"), crs = 29101, agr = "constant")
+  datos_tt <- cbind("viento"=brazil_espacial_t$Value,st_coordinates(brazil_espacial_t)[,c(1,2)])
+  datos_tt <- as.data.frame(datos_tt)
+  coordinates(datos_tt) <- ~X+Y
+  # Ajustar variograma
+  vbin <- variogram(viento ~ 1, locations = coordinates(datos_tt),datos_tt)
+  # Fit Bin
+  vbin.fit <- fit.variogram(vbin,vgm(c("Gau", "Sph", "Mat", "Exp")), fit.kappa = TRUE)
+}
+
+
+```
+
+
+###########################################################
+# FUNCION PARA REPLICAR
+###########################################################
+```{r}
+  index_test <- sample(1:nrow(datos),.3*nrow(datos)) # Indice muestra de prueba
+  ubi_test <- datos_t[index_test,c(1,2)]
+  real <- datos[index_test,1]
+  #-------------------------------------------------
+  mse_ok_idw <- function(n){
+  # valores : valores simulados (values_sim)
+  # malla: ubicaciones simuladas (grid)
+  # data: datos reales (datos)
+  # cont: contorno (contorno)
+  # P: cdf datos reales
+
+  valores_sim <- rnorm(dim(grid)[1],mu_sigma[,1],mu_sigma[,2])
+  
+  grid_s <- data.frame(cbind(grid,valores_sim)) # Datos simulados (grid simulada)
+  colnames(grid_s)<-c("X","Y","viento")
+  #-------------------------------------------------
+  coordinates(grid_s) <- ~X+Y
+  #--------------------------------
+  #-------------------------------------------------
+  # Ajuste semi-variograma 
+  vbin_sim <- variogram(viento ~ X+Y, locations = coordinates(grid_s),grid_s)
+
+  # Fit Bin
+  vbin.fit_sim <- fit.variogram(vbin_sim,vgm(c("Gau", "Sph", "Mat", "Exp")), fit.kappa = TRUE)
+  #-------------------------
+  # Prediccion Kriging e IDW ubicaciones de prueba
+  values_predsim <- numeric(length(index_test)) # Vector de valores simulados OK
+  values_predsim_idw <- numeric(length(index_test)) # Vector de valores simulados IDW
+  for (i in 1:length(index_test)) {
+  if(i==1){
+    datos_pred.grid <- ubi_test[c(i:2),]# Ubicaciones simuladas
+  }else{datos_pred.grid <- ubi_test[c(i:(i-1)),]}# Ubicaciones simuladas
+  colnames(datos_pred.grid) <- c("X","Y")
+  coords_pred <- as.data.frame(coordinates(datos_pred.grid))
+  gridded(coords_pred) = ~X+Y
+  
+  c <- capture.output(ubi.kriged <-krige(viento~X+Y,grid_s,coords_pred[1,], model = vbin.fit_sim)) # Predicción Krige
+  d <-capture.output(ubi_idw <-gstat::idw(viento~1,grid_s,coords_pred[1,])) # Prediccion idw
+  
+  mu_k <- as.numeric(ubi.kriged["var1.pred"]@data)
+  mu_idw <- as.numeric(ubi_idw["var1.pred"]@data)
+
+  values_predsim[i] <- mu_k
+  values_predsim_idw[i] <- mu_idw
+  }
+  t_values_predsim <- inverseCDF(pnorm(values_predsim),P) # Valores pred tranformados Krig
+  t_values_predsim_idw <- inverseCDF(pnorm(values_predsim_idw),P) # Valores pred tranformados idw
+
+  MSE_OK <- mean((t_values_predsim-real)^2)
+  MSE_IDW <- mean((t_values_predsim_idw-real)^2)
+   
+  c(MSE_OK,MSE_IDW)
+}
+```
+
+# Prueba datos simulados
+```{r}
+grid_s <- data.frame(cbind(values_sim,grid)) # Datos simulados (grid simulada)
+colnames(grid_s)<-c("viento","X","Y")
+grid_s_plot <- st_as_sf(grid_s,coords = c("X","Y"), crs = 29101, agr = "constant")
+ggplot() + 
+  geom_sf(data = brazil_contorno) + 
+  geom_sf(data = grid_s_plot,aes(color = viento), size = 2)+
+  scale_color_viridis_c(option = "C")+coord_sf(datum=st_crs(29101))+ 
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    panel.background = element_blank())
+
+```
+
+# Muestra real como conjunto de prueba
+```{r}
+index_test <- sample(1:nrow(datos),.3*nrow(datos)) # Indice muestra de prueba
+ubi_test <- datos_t[index_test,c(1,2)]
+real <- datos[index_test,1]
+```
+
+
+# Ajuste con datos simulados
+
+```{r}
+grid_s <- as.data.frame(cbind(grid,sim_values))
+colnames(grid_s) <- c("X","Y","viento")
+coordinates(grid_s) <- ~X+Y
+#----------------------------------#
+# Transformar datos a formato geoR
+#----------------------------------#
+grid_s_geo <- as.geodata(grid_s,coords=2:3,var=1,borders=T)
+grid_s_geo$borders <- contorno
+
+plot.geodata(grid_s_geo)
+```
+
+# Ajuste variograma datos simulados
+
+```{r}
+vbin_sim <- variogram(viento ~ 1, locations = coordinates(grid_s),grid_s)
+plot(vbin_sim)
+
+# Fit Bin
+vbin.fit_sim <- fit.variogram(vbin_sim,vgm(c("Gau", "Sph", "Mat", "Exp")), fit.kappa = TRUE)
+plot(vbin_sim,vbin.fit_sim,main="Ajuste Semivariograma Bin")
+```
+
+# Prediccion Kriging e IDW ubicaciones de prueba
+
+```{r }
+values_predsim <- numeric(length(index_test)) # Vector de valores simulados OK
+values_predsim_idw <- numeric(length(index_test)) # Vector de valores simulados IDW
+for (i in 1:length(index_test)) {
+  if(i==1){
+    datos_pred.grid <- ubi_test[c(i:2),]# Ubicaciones simuladas
+  }else{datos_pred.grid <- ubi_test[c(i:(i-1)),]}# Ubicaciones simuladas
+  colnames(datos_pred.grid) <- c("X","Y")
+  coords_pred <- as.data.frame(coordinates(datos_pred.grid))
+  gridded(coords_pred) = ~X+Y
+  
+  ubi.kriged = krige(viento~1,grid_s,coords_pred[1,], model = vbin.fit) # Predicción Krige
+  ubi_idw <- gstat::idw(viento~1,grid_s,coords_pred[1,]) # Prediccion idw
+  
+  mu_k <- as.numeric(ubi.kriged["var1.pred"]@data)
+  mu_idw <- as.numeric(ubi_idw["var1.pred"]@data)
+
+  values_predsim[i] <- mu_k
+  values_predsim_idw[i] <- mu_idw
+}
+```
+
+# Transformar predicciónes al formato original
+
+```{r}
+t_values_predsim <- inverseCDF(pnorm(values_predsim),P) # Valores pred tranformados Krig
+t_values_predsim_idw <- inverseCDF(pnorm(values_predsim_idw),P) # Valores pred tranformados idw
+
+MSE_OK <- mean((t_values_predsim-real)^2)
+MSE_IDW <- mean((t_values_predsim_idw-real)^2)
+
+print(paste("MSE KO:",MSE_OK," y el MSE IDW:",MSE_IDW))
+```
+
+# Replicas
+```{r }
+g <- replicate(100,expr = mse_ok_idw(n))
+```
+
+```{r}
+apply(g, 1, mean)
+```
+
