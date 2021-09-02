@@ -160,7 +160,7 @@ for (i in 1:n) {
   vbin.fit <- fit.variogram(vbin,vgm(c("Gau", "Sph", "Mat", "Exp")), fit.kappa = TRUE)
 }
 
-return(mu_sigma)
+return(list("matrix"=mu_sigma,"ubi"=grid))
 
 }
 ```
@@ -180,13 +180,14 @@ index_test <- sample(1:nrow(datos),.3*nrow(datos)) # Indice muestra de prueba
 #-----------------------#
 # FUNCION PARA REPLCIAR #
 #-----------------------#
-mse_ok_idw <- function(mu_sigma){
+mse_ok_idw <- function(mu_sigma,grid){
   # valores : valores simulados (values_sim)
   # malla: ubicaciones simuladas (grid)
   # data: datos reales (datos)
   # cont: contorno (contorno)
   # P: cdf datos reales
-  mu_sigma <- matrix(n_sim,ncol=2)
+  mu_sigma <- mu_sigma
+  grid <- grid
 
   valores_sim <- rnorm(dim(grid)[1],mu_sigma[,1],mu_sigma[,2])
   
@@ -235,9 +236,16 @@ mse_ok_idw <- function(mu_sigma){
 ```{r}
 library(future.apply)
 plan(multisession, workers = 2)
+ns <- seq(10,)
 n <- 50
 n_sim <- OK_IDW_n_values(n=n,contorno=contorno,datos_t=datos_t,datos_tt=datos_tt,vbin.fit=vbin.fit)
 
-g <- future_replicate(10, expr = mse_ok_idw(mu_sigma=n_sim))
+g <- future_replicate(10, expr = mse_ok_idw(mu_sigma=n_sim$matrix,grid=n_sim$ubi))
+
+apply(g, 1, mean)
+
+
+
+
 ```
 
