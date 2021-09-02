@@ -236,16 +236,22 @@ mse_ok_idw <- function(mu_sigma,grid){
 ```{r}
 library(future.apply)
 plan(multisession, workers = 2)
-ns <- seq(10,)
-n <- 50
-n_sim <- OK_IDW_n_values(n=n,contorno=contorno,datos_t=datos_t,datos_tt=datos_tt,vbin.fit=vbin.fit)
+#--------------------#
+# TAMAÑOS MUESTRALES #
+#--------------------#
+ns <- seq(10,500,10)
+#----------------------#
+# MATRIZ DE RESULTADOS #
+#----------------------#
+resultados <- matrix(0,nrow=length(ns),ncol=3)
+colnames(resultados) <- c("n","KO","IDW")
+resultados[,1] <- ns
 
-g <- future_replicate(10, expr = mse_ok_idw(mu_sigma=n_sim$matrix,grid=n_sim$ubi))
-
-apply(g, 1, mean)
-
-
-
-
+for (i in ns) {
+  
+  n_sim <- OK_IDW_n_values(n=i,contorno=contorno,datos_t=datos_t,datos_tt=datos_tt,vbin.fit=vbin.fit)
+  g <- future_replicate(1000, expr = mse_ok_idw(mu_sigma=n_sim$matrix,grid=n_sim$ubi))
+  resultados[i,c("KO","IDW")] <- apply(g, 1, mean)
+}
 ```
 
