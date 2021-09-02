@@ -186,17 +186,17 @@ mse_ok_idw <- function(mu_sigma){
   # data: datos reales (datos)
   # cont: contorno (contorno)
   # P: cdf datos reales
+  mu_sigma <- matrix(n_sim,ncol=2)
 
   valores_sim <- rnorm(dim(grid)[1],mu_sigma[,1],mu_sigma[,2])
   
   grid_s <- data.frame(cbind(grid,valores_sim)) # Datos simulados (grid simulada)
   colnames(grid_s)<-c("X","Y","viento")
-  #-------------------------------------------------
-  #coordinates(grid_s) <- ~X+Y
+  coordinates(grid_s) <- ~X+Y
   #--------------------------------
   #-------------------------------------------------
   # Ajuste semi-variograma 
-  vbin_sim <- variogram(viento ~ X+Y, locations = ~X+Y,grid_s)
+  vbin_sim <- variogram(viento ~ X+Y, locations = coordinates(grid_s),grid_s)
 
   # Fit Bin
   vbin.fit_sim <- fit.variogram(vbin_sim,vgm(c("Gau", "Sph", "Mat", "Exp")), fit.kappa = TRUE)
@@ -234,10 +234,10 @@ mse_ok_idw <- function(mu_sigma){
 
 ```{r}
 library(future.apply)
-plan(multisession, workers = 8)
+plan(multisession, workers = 2)
 n <- 50
-n_sim <- OK_IDW_n_values(n,contorno,datos_t,datos_tt,vbin.fit)
+n_sim <- OK_IDW_n_values(n=n,contorno=contorno,datos_t=datos_t,datos_tt=datos_tt,vbin.fit=vbin.fit)
 
-g <- future_replicate(100, expr = mse_ok_idw(mu_sigman_sim))
+g <- future_replicate(10, expr = mse_ok_idw(mu_sigma=n_sim))
 ```
 
