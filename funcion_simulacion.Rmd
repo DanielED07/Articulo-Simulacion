@@ -74,7 +74,7 @@ coordinates(datos_tt) <- ~X+Y
 # AJUSTE VARIOGRAMA DATOS TRANSFORMADOS #
 #---------------------------------------#
 vbin <- variogram(viento ~ 1, locations = coordinates(datos_tt),datos_tt)
-vbin.fit <- fit.variogram(vbin,vgm(c("Gau", "Sph", "Mat", "Exp")), fit.kappa = TRUE)
+vbin.fit <- fit.variogram(vbin,vgm(c("Gau")), fit.kappa = TRUE)
 ```
 
 # Funcion para generar valores en las n ubicaciones
@@ -157,7 +157,7 @@ for (i in 1:n) {
   # Ajustar variograma
   vbin <- variogram(viento ~ 1, locations = coordinates(datos_tt),datos_tt)
   # Fit Bin
-  vbin.fit <- fit.variogram(vbin,vgm(c("Gau", "Sph", "Mat", "Exp")), fit.kappa = TRUE)
+  vbin.fit <- fit.variogram(vbin,vgm(c("Gau")), fit.kappa = TRUE)
 }
 
 return(list("matrix"=mu_sigma,"ubi"=grid))
@@ -257,6 +257,6 @@ for (i in ns) {
 
 ```
 ```{r}
-save(resultados, file = "resultados.RData")
+save(resultados, file = "resultados2.RData")
 ```
 
